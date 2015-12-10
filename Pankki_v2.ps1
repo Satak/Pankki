@@ -7,9 +7,9 @@
 #region Globals 
 $version = '1.2'
 $exit = $false
-$configPath = 'C:\Powershell\Pankki-master\DBConnection.json'
+$configPath = 'C:\Powershell\Pankki\DBConnection.json'
 
-$DBCon = Get-Content C:\Powershell\Pankki-master\DBConnection.json | ConvertFrom-Json
+$DBCon = Get-Content $configPath | ConvertFrom-Json
 $DBCon.Password = ConvertTo-PlainText -string $DBCon.Password
 
 $prop = @{
@@ -413,7 +413,7 @@ param($User)
                 $summa = $_.Amount -as [int]
 
                     
-                    if($_.Kohde)
+                    if($_.Kohde -and $_.Kohde -isnot [DBNull])
                     {
                         $Tapahtuma = 'Tilisiirto'
                         $kohde = $_.Kohde
