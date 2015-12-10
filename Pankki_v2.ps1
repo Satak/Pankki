@@ -533,8 +533,11 @@ param($User)
 
                 $Users = Get-UserFromDB -filter "ID != $($User.ID) AND Admin != 1" | select Nimi,Sukunimi,ID
                 $opt = $Users | Out-GridView -PassThru
-                $payment = $null
-                $payment = New-Payment -SourceID $User.ID -TargetID $opt.ID -Amount $qm
+                if($opt)
+                {
+                    $payment = $null
+                    $payment = New-Payment -SourceID $User.ID -TargetID $opt.ID -Amount $qm
+                }
                 if($payment.Status)
                 {
                     Add-BankTransaction -SourceID $user.id -TargetID $opt.ID -Amount -$qm
@@ -546,6 +549,7 @@ param($User)
                     Write-Warning "Tilisiirto epäonnistui"
                     $payment.Message 
                 }
+                
             }
 
             4 # PIN
