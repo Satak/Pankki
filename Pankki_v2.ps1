@@ -98,11 +98,9 @@ function Print-BankLogo
 
 function Get-SecKey
 {
-    $key = $null
+
     $prop.Query = "select SecKey FROM SecKey"
-
     $key = (Invoke-Sqlcmd @prop).SecKey
-
 
     if(!$key)
     {
@@ -203,38 +201,31 @@ param(
 
 function Prompt-PINCode
 {
-        $readPIN = $null
+param(
+[switch] $AsHash
+)
 
-        while($readPIN.Length -ne 4 -OR !($cc1 -match "^[0-9]+$"))
+    while($readPIN.Length -ne 4 -OR !($cc1 -match "^[0-9]+$"))
+    {
+        $readPIN = Read-Host "Anna PIN-koodi (neljä numeroa)" -AsSecureString
+
+        if($readPIN.Length -eq4)
         {
-            $readPIN = Read-Host "Anna PIN-koodi (neljä numeroa)" -AsSecureString
-
-            if($readPIN.Length -eq4)
-            {
-                $PINString = $readPIN | ConvertFrom-SecureString -key $secKey
-
-                $cc1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($readPIN)
-                $cc1 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($cc1)
-            }
+            $cc1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($readPIN)
+            $cc1 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($cc1)
         }
+    }
 
+    if($AsHash)
+    {
         return Hash-String -string $cc1
+    }
+    return $cc1
 }
 
 function Add-NewUser
 {
-  
-    #region Prompt menu
-    $title = "Uusi käyttäjä"
-    $message = "Tehdäänkö käyttäjä?"
-    $opList = 'Kyllä','Ei'
-    $op = $opList | %{
-        New-Object System.Management.Automation.Host.ChoiceDescription "&$_", "$_"
-    }
-    $rr = $host.ui.PromptForChoice($title, $message, $op, 0) 
-    #endregion
-
-    switch ($rr)
+    switch (Invoke-Prompt -Title 'Uusi käyttäjä' -Message 'Tehdäänkö käyttäjä?')
         {
             0 {
                 $nimi = Read-Host "Etunimi"
@@ -246,22 +237,7 @@ function Add-NewUser
 
                 }until($Ika -in 18..150)
 
-                $readPIN = $null
-
-                while($readPIN.Length -ne 4 -OR !($cc1 -match "^[0-9]+$"))
-                {
-                    $readPIN = Read-Host "Anna PIN-koodi (neljä numeroa)" -AsSecureString
-
-                    if($readPIN.Length -eq4)
-                    {
-                        $PINString = $readPIN | ConvertFrom-SecureString -key $secKey
-
-                        $cc1 = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($readPIN)
-                        $cc1 = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($cc1)
-                    }
-                }
-
-                $cryp = Hash-String -string $cc1
+                $cryp = Prompt-PINCode -AsHash
 
                 $adder = Add-UserToDB -Nimi $nimi -Sukunimi $sukunimi -Ika $Ika -Hash $cryp.Hash -Salt $cryp.Salt
                 return $adder.message     
@@ -375,14 +351,38 @@ param($ID)
     Invoke-Sqlcmd @prop
 }
 
+function Invoke-AmountAsk
+{
+param(
+$Function
+)
+
+    do
+    {
+        $qm = $null
+        try
+        {
+            [int]$qm = Read-Host "[$function] Syötä summa"
+        }
+        catch
+        {
+            cls
+            Write-Output "Virheellinen muoto. Syötä summa lukuna"
+        }
+    }
+    until($qm -is [int])
+
+    return $qm
+}
+
 function Invoke-BankFunction
 {
 param($User)
     $exit = $false
     while(!$exit)
     {
-        $title = "Pankki"
-        $msg = "Valitse toiminto"
+        $qm = $null
+        $user = Get-UserFromDB -filter "ID = $($User.ID)"
         $toiminnot = '1.Saldo','2.Pano','3.Otto','4.Tilisiirto','5.Vaihda PIN','6.Kirjaudu ulos'
 
         if($User.Admin)
@@ -390,19 +390,12 @@ param($User)
             $toiminnot += '7.Poista käyttäjä'
         }
 
-        $opt = $toiminnot | % {
-            New-Object System.Management.Automation.Host.ChoiceDescription "&$_", $_
-        }
-
-        $result = $host.ui.PromptForChoice($title, $msg, $opt, 0) 
-
-        switch ($result)
+        switch (Invoke-Prompt -Options $toiminnot)
         {
             0 # Saldo
             {
                 cls
-                Print-BankLogo
-                $user = Get-UserFromDB -filter "ID = $($User.ID)"
+                Print-BankLogo          
                 Write-Output "Käyttäjä: $($user.Nimi) $($user.Sukunimi)"
                 Write-Output "Saldo: $($user.rahat) EUR"
                 [environment]::NewLine
@@ -431,9 +424,7 @@ param($User)
                     {
                         $Tapahtuma = 'PANO'
                         $kohde = $null
-                    }
-
-                    
+                    }     
 
                     [pscustomobject]@{
                         Summa = $summa
@@ -451,23 +442,8 @@ param($User)
             }
 
             1 # Pano
-            {
-                do
-                {
-                    $qm = $null
-                    try
-                    {
-                        [int]$qm = Read-Host "[Pano] Syötä summa"
-                    }
-                    catch
-                    {
-                        cls
-                        Write-Output "Virheellinen muoto. Syötä summa lukuna"
-                    }
-                }
-                until($qm -is [int])
-
-                $user = Get-UserFromDB -filter "ID = $($User.ID)"
+            {          
+                $qm = Invoke-AmountAsk -Function PANO
 
                 if($user.Rahat -is [DBNull])
                 {
@@ -488,23 +464,7 @@ param($User)
 
             2 # Otto
             {
-                do
-                {
-                    $qm = $null
-                    try
-                    {
-                        [int]$qm = Read-Host "[Otto] Syötä summa"
-                    }
-                    catch
-                    {
-                        cls
-                        Write-Output "Virheellinen muoto. Syötä summa lukuna"
-                    }
-                }
-                until($qm -is [int])
-
-                $user = Get-UserFromDB -filter "ID = $($User.ID)"
-
+                $qm = Invoke-AmountAsk -Function OTTO
                 $User.Rahat -= $qm
                 Update-Rahat -ID $User.ID -Raha $User.Rahat
                 Add-BankTransaction -SourceID $user.id -Amount -$qm
@@ -516,23 +476,11 @@ param($User)
             
             3 # Tilisiirto
             {
-                do
-                {
-                    $qm = $null
-                    try
-                    {
-                        [int]$qm = Read-Host "[Tilisiirto] Syötä summa"
-                    }
-                    catch
-                    {
-                        cls
-                        Write-Output "Virheellinen muoto. Syötä summa lukuna"
-                    }
-                }
-                until($qm -is [int])
+                $qm = Invoke-AmountAsk -Function Tilisiirto
 
                 $Users = Get-UserFromDB -filter "ID != $($User.ID) AND Admin != 1" | select Nimi,Sukunimi,ID
                 $opt = $Users | Out-GridView -PassThru
+
                 if($opt)
                 {
                     $payment = $null
@@ -554,7 +502,6 @@ param($User)
 
             4 # PIN
             {
-                $pinAction = $null
                 $pinAction = New-PIN -ID $User.ID
                 $pinAction.message
             }
@@ -572,18 +519,8 @@ param($User)
                 $valinta = $Users | Out-GridView -PassThru
 
                 if($valinta)
-                {
-                    $title = "Käyttäjän poisto"
-                    $msg = "Poistetaanko käyttäjä '$($valinta.Nimi) $($valinta.Sukunimi)' varmasti?"
-
-                    $tt = 'Kyllä','Ei'
-                    $opt = $tt | % {
-                        New-Object System.Management.Automation.Host.ChoiceDescription "&$_", $_
-                    }
-
-                    $result = $host.ui.PromptForChoice($title, $msg, $opt, 0) 
-
-                    switch($result)
+                {           
+                    switch(Invoke-Prompt -Options 'Kyllä','Ei' -Title 'Käyttäjän poisto' -Message "Poistetaanko käyttäjä '$($valinta.Nimi) $($valinta.Sukunimi)' varmasti?")
                     {
                        0
                        {
@@ -613,7 +550,7 @@ param($ID)
     try
     {
 
-        $newPIN = Prompt-PINCode
+        $newPIN = Prompt-PINCode -AsHash
 
         if($newPIN)
         {
@@ -640,16 +577,18 @@ param($ID)
     }
 }
 
-function Invoke-FirstPrompt
+function Invoke-Prompt
 {
-    $title = "Pankki"
-    $msg = "Valitse toiminto"
-    $optList = '1.Kirjaudu sisään','2.Rekisteröidy','3.Exit'
-    $opt = $optList | % {
+param(
+$Options = ('Kyllä','Ei'),
+$Title = "Pankki",
+$Message = "Valitse toiminto"
+)
+    $opt = $options | % {
         New-Object System.Management.Automation.Host.ChoiceDescription "&$_", $_
     }
 
-    return $host.ui.PromptForChoice($title, $msg, $opt, 0) 
+    return $host.ui.PromptForChoice($Title, $Message, $opt, 0) 
 }
 
 #endregion
@@ -661,22 +600,13 @@ while(!$exit)
     print-BankLogo
     sleep -Milliseconds 100
 
-    $result = Invoke-FirstPrompt
-
-    switch($result)
+    switch(Invoke-Prompt -Options '1.Kirjaudu sisään','2.Rekisteröidy','3.Exit')
     {  
         0 # Login
         {
-            $PIN = $null
             $r = Read-Host "Anna nimi"
-            $PIN = Read-Host "Anna PIN-koodi" -AsSecureString
 
-            $PIN = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($PIN)
-            $PIN = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($PIN)
-
-            $test = Test-PW -Username $r -Password $PIN
-
-            if($test)
+            if(Test-PW -Username $r -Password (Prompt-PINCode))
             {
                 Write-Output "Kirjautuminen onnistui"
                 Invoke-BankFunction -User (Get-UserFromDB -filter "Nimi = '$r'")
@@ -706,4 +636,4 @@ while(!$exit)
         break
     }
 
-}
+} # Main loop ends
